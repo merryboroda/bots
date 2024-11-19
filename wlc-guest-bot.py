@@ -7,11 +7,9 @@ import string
 import logging
 
 TELEGRAM_TOKEN = "token"
-
 WLC_HOST = "ip_address"
-WLC_USERNAME = "admin"
+WLC_USERNAME = "username"
 WLC_PASSWORD = "password"
-
 SSID = "ssid"
 ACCOUNT_DURATION_DAYS = 1
 
@@ -20,21 +18,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Функция для генерации случайного пароля
+# Генерация случайного пароля
 def generate_password(length=8):
     characters = string.ascii_letters + string.digits
     return ''.join(random.choice(characters) for _ in range(length))
 
-# Функция для создания гостевой учетной записи на Cisco WLC
-def create_guest_account():
-    # Генерация уникального имени пользователя и пароля
-    username = f"guest_{datetime.now().strftime('%d%m%H%M')}"
+# Создание гостевой учетной записи
+def create_guest_account(custom_name: str):
+    # Проверяем корректность имени
+    if not custom_name.isalnum():
+        return None, None, None, "Имя может содержать только буквы и цифры."
+
+    # Добавляем префикс "guest_"
+    username = f"guest_{custom_name}"
     password = generate_password()
 
-    # Вычисление срока действия учетной записи
+    # Вычисляем срок действия учетной записи
     expiration_date = (datetime.now() + timedelta(days=ACCOUNT_DURATION_DAYS)).strftime('%m/%d/%Y')
 
-    # Команда для создания гостевой учетной записи
+    # Команда для создания учетной записи
     commands = [
         f"config netuser add {username} {password} wlan 2 userType guest lifetime 86400 description Guest"
     ]
@@ -53,26 +55,45 @@ def create_guest_account():
         for command in commands:
             connection.send_command(command)
         connection.disconnect()
-        return username, password, expiration_date
+        return username, password, expiration_date, None
     except Exception as e:
         logger.error(f"Ошибка подключения: {e}")
-        return None, None, None
+        return None, None, None, "Ошибка подключения к Cisco WLC."
+
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("Привет! Я бот для создания гостевых учетных записей. Введите /create для создания новой учетной записи.")
+    await update.message.reply_text(
+        "Привет! Я бот для создания гостевых учетных записей.\n"
+        "Введите /create <имя>, чтобы создать новую учетную запись."
+    )
+
 
 # Команда /create
 async def create(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if len(context.args) == 0:
+        await update.message.reply_text(
+            "Пожалуйста, укажите имя для учетной записи после команды. Например: /create Ivan")
+        return
+
+    custom_name = context.args[0]
     await update.message.reply_text("Создаю учетную запись...")
 
-    username, password, expiration_date = create_guest_account()
-    if username and password:
+    username, password, expiration_date, error = create_guest_account(custom_name)
+
+    if error:
+        await update.message.reply_text(f"Ошибка: {error}")
+    elif username and password:
         await update.message.reply_text(
-            f"Гостевая учетная запись создана!\nSSID: {SSID}\nИмя пользователя: {username}\nПароль: {password}\nСрок действия: до {expiration_date}"
+            f"Гостевая учетная запись создана!\n"
+            f"SSID: {SSID}\n"
+            f"Имя пользователя: {username}\n"
+            f"Пароль: {password}\n"
+            f"Срок действия: до {expiration_date}"
         )
     else:
-        await update.message.reply_text("Ошибка при создании учетной записи. Пожалуйста, попробуйте позже.")
+        await update.message.reply_text("Не удалось создать учетную запись. Попробуйте позже.")
+
 
 # Основная функция для запуска бота
 def main():
@@ -85,6 +106,7 @@ def main():
 
     # Запуск бота
     application.run_polling()
+
 
 if __name__ == "__main__":
     main()
